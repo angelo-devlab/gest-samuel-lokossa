@@ -189,14 +189,12 @@ export function RecensementForm({
             placeholder="+229 01 97 00 00 00"
             aide="Joignable en cas d'urgence pendant un camp"
           />
-          <Input
-            label="Photo de profil"
-            type="url"
-            value={v.photo_url}
-            onChange={(e) => maj('photo_url', e.target.value)}
-            placeholder="https://…"
-            aide="Adresse de l'image affichée sur le Pass"
-          />
+         <input 
+          type="file" 
+          accept="image/*" 
+          capture="environment" 
+          id="photoInput"
+        />
         </div>
       </Panneau>
 

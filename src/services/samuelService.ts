@@ -108,23 +108,36 @@ export const samuelService = {
     };
 
     if (supabaseConfigure && supabase) {
-      const p = getParoisse(saisie.paroisse_code);
+      // 1. Récupérer l'id_paroisse numérique à partir du code (ex: "LOB")
+      const { data: paroisseData, error: paroisseErr } = await supabase
+        .from('paroisses')
+        .select('id_paroisse')
+        .eq('code_paroisse', saisie.paroisse_code)
+        .single();
+
+      if (paroissErr || !paroisseData) {
+        throw new Error("Paroisse introuvable pour ce code.");
+      }
+
+      // 2. On extrait explicitement paroisse_code pour ne pas l'envoyer à la table 'membres'
+      const { paroisse_code, ...donneesInsertion } = membre;
+
+      // 3. Insérer le membre en envoyant paroisse_id (qui est bien un integer)
       const { data, error } = await supabase
         .from('membres')
-        .insert({ ...membre, paroisse_id: p?.code, paroisse_code: undefined })
+        .insert({ 
+          ...donneesInsertion, 
+          paroisse_id: paroisseData.id_paroisse
+        })
         .select()
         .single();
+
       if (error) throw new Error(`Enregistrement refusé : ${error.message}`);
       return enrichir(data as Samuel);
     }
-
-    stockageLocal.ajouterMembre(membre);
-    return enrichir(membre);
   },
 
-  async modifier(nid: string, modifs: Partial<Samuel>): Promise<SamuelEnrichi> {
-    // Le groupe suit toujours l'ancienneté : on le recalcule si l'une des
-    // deux données dont il dépend a changé.
+ async modifier(nid: string, modifs: Partial<Samuel>): Promise<SamuelEnrichi> {
     const complement: Partial<Samuel> = {};
     if (modifs.date_entree || modifs.est_responsable !== undefined) {
       const actuel = await this.parNID(nid);
@@ -136,10 +149,26 @@ export const samuelService = {
       }
     }
 
+    // Gestion propre de la paroisse si elle est modifiée
+    let donneesAMettreAJour: any = { ...modifs, ...complement };
+    
+    if (donneesAMettreAJour.paroisse_code && supabaseConfigure && supabase) {
+      const { data: paroisseData } = await supabase
+        .from('paroisses')
+        .select('id_paroisse')
+        .eq('code_paroisse', donneesAMettreAJour.paroisse_code)
+        .single();
+
+      if (paroisseData) {
+        donneesAMettreAJour.paroisse_id = paroisseData.id_paroisse;
+      }
+      delete donneesAMettreAJour.paroisse_code; // On supprime pour éviter l'erreur de colonne inexistante
+    }
+
     if (supabaseConfigure && supabase) {
       const { data, error } = await supabase
         .from('membres')
-        .update({ ...modifs, ...complement })
+        .update(donneesAMettreAJour)
         .eq('id_nid', nid)
         .select()
         .single();
@@ -147,7 +176,7 @@ export const samuelService = {
       return enrichir(data as Samuel);
     }
 
-    const maj = stockageLocal.modifierMembre(nid, { ...modifs, ...complement });
+    const maj = stockageLocal.modifierMembre(nid, donneesAMettreAJour);
     if (!maj) throw new Error(`Matricule introuvable : ${nid}`);
     return enrichir(maj);
   },
@@ -215,3 +244,33 @@ export function calculerStatistiques(membres: SamuelEnrichi[]): Statistiques {
     paroissesActives: paroisses.size,
   };
 }
+
+export async function uploaderEtObtenirUrlPhoto(file: File): Promise<string | null> {
+  if (!file) return null;
+
+  // 1. Créer un nom de fichier unique pour éviter les doublons
+  const fileExt = file.name.split('.').pop() || 'jpg';
+  const fileName = `samuel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+  const filePath = `public/${fileName}`;
+
+  // 2. Envoyer le fichier de manière permanente dans le bucket "membres-photos"
+  const { error: uploadError } = await supabase.storage
+    .from('membres-photos')
+    .upload(filePath, file);
+
+  if (uploadError) {
+    console.error("Erreur lors de l'upload :", uploadError.message);
+    throw new Error("Impossible d'enregistrer la photo.");
+  }
+
+  // 3. Récupérer l'URL publique et permanente de l'image
+  const { data } = supabase.storage
+    .from('membres-photos')
+    .getPublicUrl(filePath);
+
+  return data.publicUrl; // C'est cette URL qu'il faut stocker dans la base de données
+}
+
+// Insertion dans la base de données Supabase
+
+  
