@@ -14,6 +14,8 @@ import { FormateurForm } from '../components/forms/FormateurForm';
 import { GROUPES } from '../config/constants';
 import { normaliser, formaterNombre } from '../lib/utils';
 import { getParoisse } from '../config/doyennesParoisses';
+import type { NumeroGroupe } from '../config/constants';
+import { BadgeGroupe } from '../components/ui/Badge';
 
 /**
  * Fichier des formateurs et affectation par groupe (CDCF Module 3).
@@ -64,8 +66,8 @@ export function Formateurs() {
       const cible = f.paroisse_affectation_code ?? f.paroisse_code;
       const s = couverture.get(cible) ?? new Set<number>();
       // Sécurisation : on s'assure que f.groupes existe avant d'itérer
-      const listeGroupes = Array.isArray(f.groupes) ? f.groupes : (f.affectations?.map(a => a.groupe) || []);
-      listeGroupes.forEach((g) => s.add(g));
+      const listeGroupes: NumeroGroupe[] = Array.isArray(f.groupes) ? f.groupes : [];
+      listeGroupes.forEach((g: NumeroGroupe) => s.add(g));
       couverture.set(cible, s);
     }
 
@@ -141,17 +143,15 @@ export function Formateurs() {
       entete: 'Groupes',
       valeurTri: (f) => (f.groupes || []).join(','),
       rendu: (f) => {
-        const groupesAffiches = Array.isArray(f.groupes) ? f.groupes : (f.affectations?.map(a => a.groupe) || []);
+        const groupesAffiches: NumeroGroupe[] = Array.isArray(f.groupes) ? f.groupes : [];
         return (
           <span className="flex flex-wrap gap-1">
             {groupesAffiches.length === 0 ? (
               <span className="text-petit text-texte-faible">—</span>
             ) : (
-              groupesAffiches.map((g) => (
-                <Badge key={g} ton="bleu">
-                  G{g}
-                </Badge>
-              ))
+             groupesAffiches.map((g: NumeroGroupe) => (
+  <BadgeGroupe key={g} groupe={g} bref />
+))
             )}
           </span>
         );
@@ -269,22 +269,19 @@ export function Formateurs() {
       >
         {enEdition && (
           <FormateurForm
-            valeursInitiales={{
-              nom: enEdition.nom,
-              prenom: enEdition.prenom,
-              contact: enEdition.contact,
-              paroisse_code: enEdition.paroisse_code,
-              est_decanal_secteur: enEdition.est_decanal_secteur,
-              // On extrait proprement les numéros de groupes depuis affectations ou f.groupes
-              groupes: Array.isArray(enEdition.groupes) && enEdition.groupes.length > 0 
-                ? enEdition.groupes 
-                : (enEdition.affectations?.map((a: any) => a.groupe) || []),
-              paroisse_affectation_code: enEdition.paroisse_affectation_code,
-            }}
-            paroissesAutorisees={autorisees}
-            onEnregistrer={enregistrer}
-            onAnnuler={() => setEnEdition(null)}
-          />
+        valeursInitiales={{
+          nom: enEdition.nom,
+          prenom: enEdition.prenom,
+          contact: enEdition.contact,
+          paroisse_code: enEdition.paroisse_code,
+          est_decanal_secteur: enEdition.est_decanal_secteur,
+          groupes: enEdition.groupes ?? [],
+          paroisse_affectation_code: enEdition.paroisse_affectation_code,
+        }}
+        paroissesAutorisees={autorisees}
+        onEnregistrer={enregistrer}
+        onAnnuler={() => setEnEdition(null)}
+      />
         )}
       </Modal>
 

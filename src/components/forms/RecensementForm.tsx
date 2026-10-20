@@ -210,7 +210,7 @@ export function RecensementForm({
                   if (!file) return;
                   try {
                     setEnCours(true);
-                    const url = await uploaderEtObtenirUrlPhoto(file);
+                    const url = await uploaderEtObtenirUrlPhoto(nidExistant || 'temp', file);
                     if (url) {
                       maj('photo_url', url);
                     }

@@ -256,28 +256,27 @@ export function calculerStatistiques(membres: SamuelEnrichi[]): Statistiques {
   };
 }
 
-export async function uploaderEtObtenirUrlPhoto(file: File): Promise<string | null> {
-  if (!file) return null;
+import { exigerSupabase } from '../lib/supabaseClient';
 
-  const fileExt = file.name.split('.').pop() || 'jpg';
-  // Nom unique directement à la racine du bucket
-  const fileName = `samuel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+export async function uploaderEtObtenirUrlPhoto(
+  idNid: string,
+  fichier: File
+): Promise<string> {
+  const client = exigerSupabase();
+  const extension = fichier.name.split('.').pop() || 'jpg';
+  const cheminFichier = `${idNid}-${Date.now()}.${extension}`;
 
-  const { error: uploadError } = await supabase.storage
+  const { error: uploadError } = await client.storage
     .from('membres-photos')
-    .upload(fileName, file, {
-      cacheControl: '3600',
-      upsert: true,
-    });
+    .upload(cheminFichier, fichier, { upsert: true });
 
   if (uploadError) {
-    console.error("Erreur d'upload Supabase Storage :", uploadError.message);
-    throw new Error(uploadError.message);
+    throw new Error(`Erreur lors de l'envoi de la photo : ${uploadError.message}`);
   }
 
-  const { data } = supabase.storage
+  const { data } = client.storage
     .from('membres-photos')
-    .getPublicUrl(fileName);
+    .getPublicUrl(cheminFichier);
 
   return data.publicUrl;
 }
