@@ -8,8 +8,8 @@ export function Footer() {
         {NB_DOYENNES_PAROISSES}
       </p>
       <p className="mt-0.5">
-        Registre Matrice Diocésain, version 2.0. Les données nominatives des mineurs
-        inscrits ne sortent pas du périmètre pastoral de chaque responsable.
+        Registre Matrice Diocésain, version 1.0.
+        Conception et Design UX/UI : Angelo ADANHOUNME (ADH).
       </p>
     </footer>
   );
