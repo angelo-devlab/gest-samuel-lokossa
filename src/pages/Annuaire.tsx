@@ -133,8 +133,6 @@ export function Annuaire() {
       cle: 'nid',
       entete: 'Matricule',
       largeur: '11rem',
-      // Sous `sm`, une colonne de matricule à largeur fixe pousse le tableau
-      // hors de l'écran : le numéro passe alors sous le nom.
       masquerSous: 'sm',
       valeurTri: (m) => m.id_nid,
       rendu: (m) => <span className="matricule text-petit">{m.id_nid}</span>,
@@ -322,7 +320,7 @@ export function Annuaire() {
         />
       )}
 
-      {/* Fiche détaillée. */}
+      {/* Fiche détaillée */}
       <Modal
         ouvert={selection !== null}
         onFermer={fermerFiche}
@@ -381,6 +379,27 @@ export function Annuaire() {
             </div>
 
             <div className="flex flex-col gap-4">
+              {/* En-tête avec la photo du Samuel */}
+              <div className="flex items-center gap-4 rounded-[var(--radius-panneau)] border border-bordure bg-fond-discret p-3">
+                {selection.photo_url ? (
+                  <img
+                    src={selection.photo_url}
+                    alt={`${selection.prenom} ${selection.nom}`}
+                    className="h-16 w-16 rounded-full object-cover border-2 border-vert-bordure shadow-sm"
+                  />
+                ) : (
+                  <div className="grid h-16 w-16 place-items-center rounded-full border border-bordure bg-fond text-moyen font-bold text-texte-doux">
+                    {selection.prenom[0]}{selection.nom[0]}
+                  </div>
+                )}
+                <div>
+                  <h3 className="text-moyen font-bold text-texte">
+                    {selection.prenom} {selection.nom}
+                  </h3>
+                  <p className="matricule text-petit text-bleu-lien">{selection.id_nid}</p>
+                </div>
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 <BadgeValidation valide={selection.statut_validation} />
                 <BadgeGroupe groupe={selection.groupe_calcule} />
@@ -425,8 +444,7 @@ export function Annuaire() {
                 </Champ>
               </dl>
 
-              {/* Promotion : le geste le plus fréquent d'un responsable, à
-                  portée de main sans passer par le formulaire complet. */}
+              {/* Promotion dans les grades */}
               {droits.peutPromouvoir(compte) && (
                 <div className="rounded-[var(--radius-panneau)] border border-bordure bg-fond-discret px-3.5 py-3">
                   <GradeSelect

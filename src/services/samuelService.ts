@@ -16,14 +16,20 @@ import { stockageLocal } from './stockageLocal';
  */
 
 /** Ajoute les libellés territoriaux et l'ancienneté recalculée. */
+import { parseNID } from '../lib/generateNID';
+
+/** Ajoute les libellés territoriaux et l'ancienneté recalculée. */
 export function enrichir(m: Samuel, reference: Date = new Date()): SamuelEnrichi {
-  const p = getParoisse(m.paroisse_code);
+  // Si paroisse_code n'est pas fourni par la DB, on l'extrait depuis le matricule NID (ex: LOK-2026-TOV-001 -> TOV)
+  const codeParoisse = m.paroisse_code || parseNID(m.id_nid)?.paroisseCode || '';
+  const p = getParoisse(codeParoisse);
+
   return {
     ...m,
-    // Le groupe est redérivé à chaque lecture : un Samuel change de groupe
-    // le jour anniversaire de son entrée, sans écriture en base.
+    paroisse_code: codeParoisse,
+    // Le groupe est redérivé à chaque lecture
     groupe_calcule: calculerGroupe(m.date_entree, m.est_responsable, reference),
-    paroisse_nom: p?.nom ?? m.paroisse_code,
+    paroisse_nom: p?.nom ?? codeParoisse,
     doyenne_nom: p?.doyenneNom ?? '—',
     doyenne_slug: p?.doyenneSlug ?? '',
     anciennete_annees: calculerAnciennete(m.date_entree, reference),
@@ -108,25 +114,25 @@ export const samuelService = {
     };
 
     if (supabaseConfigure && supabase) {
-      // 1. Récupérer l'id_paroisse numérique à partir du code (ex: "LOB")
-      const { data: paroisseData, error: paroisseErr } = await supabase
+      // 1. Récupérer l'id_paroisse numérique à partir du code (ex: "DOU", "LOB")
+      const { data: paroisseData, error: paroisseError } = await supabase
         .from('paroisses')
         .select('id_paroisse')
         .eq('code_paroisse', saisie.paroisse_code)
         .single();
 
-      if (paroissErr || !paroisseData) {
+      if (paroisseError || !paroisseData) {
         throw new Error("Paroisse introuvable pour ce code.");
       }
 
-      // 2. On extrait explicitement paroisse_code pour ne pas l'envoyer à la table 'membres'
-      const { paroisse_code, ...donneesInsertion } = membre;
+      // 2. Extraire explicitement 'paroisse_code' pour ne PAS l'envoyer à Supabase
+      const { paroisse_code, ...donneesAInserer } = membre;
 
-      // 3. Insérer le membre en envoyant paroisse_id (qui est bien un integer)
+      // 3. Insérer dans la table 'membres' avec 'paroisse_id' (entier)
       const { data, error } = await supabase
         .from('membres')
         .insert({ 
-          ...donneesInsertion, 
+          ...donneesAInserer, 
           paroisse_id: paroisseData.id_paroisse
         })
         .select()
@@ -135,7 +141,12 @@ export const samuelService = {
       if (error) throw new Error(`Enregistrement refusé : ${error.message}`);
       return enrichir(data as Samuel);
     }
+
+    // Mode fallback local si Supabase n'est pas configuré
+    const enregistre = stockageLocal.ajouterMembre(membre);
+    return enrichir(enregistre);
   },
+  
 
  async modifier(nid: string, modifs: Partial<Samuel>): Promise<SamuelEnrichi> {
     const complement: Partial<Samuel> = {};
@@ -248,29 +259,25 @@ export function calculerStatistiques(membres: SamuelEnrichi[]): Statistiques {
 export async function uploaderEtObtenirUrlPhoto(file: File): Promise<string | null> {
   if (!file) return null;
 
-  // 1. Créer un nom de fichier unique pour éviter les doublons
   const fileExt = file.name.split('.').pop() || 'jpg';
+  // Nom unique directement à la racine du bucket
   const fileName = `samuel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-  const filePath = `public/${fileName}`;
 
-  // 2. Envoyer le fichier de manière permanente dans le bucket "membres-photos"
   const { error: uploadError } = await supabase.storage
     .from('membres-photos')
-    .upload(filePath, file);
+    .upload(fileName, file, {
+      cacheControl: '3600',
+      upsert: true,
+    });
 
   if (uploadError) {
-    console.error("Erreur lors de l'upload :", uploadError.message);
-    throw new Error("Impossible d'enregistrer la photo.");
+    console.error("Erreur d'upload Supabase Storage :", uploadError.message);
+    throw new Error(uploadError.message);
   }
 
-  // 3. Récupérer l'URL publique et permanente de l'image
   const { data } = supabase.storage
     .from('membres-photos')
-    .getPublicUrl(filePath);
+    .getPublicUrl(fileName);
 
-  return data.publicUrl; // C'est cette URL qu'il faut stocker dans la base de données
+  return data.publicUrl;
 }
-
-// Insertion dans la base de données Supabase
-
-  

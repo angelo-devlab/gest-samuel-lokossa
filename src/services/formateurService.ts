@@ -15,17 +15,26 @@ export interface FormateurEnrichi extends Formateur {
   affectation_nom: string;
 }
 
-function enrichir(f: Formateur): FormateurEnrichi {
-  const rattachement = getParoisse(f.paroisse_code);
+function enrichir(f: any): FormateurEnrichi {
+  // Garantir que affectations est toujours au moins un tableau vide pour éviter les erreurs .forEach() ou .map()
+  const affectations = Array.isArray(f?.affectations) ? f.affectations : [];
+
+  // Récupérer le code de paroisse (que ce soit depuis paroisse_code ou via la vue/relation)
+  const codeParoisse = f.paroisse_code || f.paroisses?.code_paroisse || '';
+  const rattachement = getParoisse(codeParoisse);
+
   const affectation = f.paroisse_affectation_code
     ? getParoisse(f.paroisse_affectation_code)
     : rattachement;
+
   return {
     ...f,
-    paroisse_nom: rattachement?.nom ?? f.paroisse_code,
+    paroisse_code: codeParoisse,
+    affectations, // Sécurisé : toujours un tableau !
+    paroisse_nom: rattachement?.nom ?? codeParoisse,
     doyenne_nom: rattachement?.doyenneNom ?? '—',
     doyenne_slug: rattachement?.doyenneSlug ?? '',
-    affectation_nom: affectation?.nom ?? f.paroisse_code,
+    affectation_nom: affectation?.nom ?? codeParoisse,
   };
 }
 
@@ -64,9 +73,9 @@ export function affectationRecevable(
 export const formateurService = {
   async tous(): Promise<FormateurEnrichi[]> {
     if (supabaseConfigure && supabase) {
-      const { data, error } = await supabase.from('formateurs').select('*, affectations(*)');
+      const { data, error } = await supabase.from('formateurs').select('*, affectations(*), paroisses(code_paroisse)');
       if (error) throw new Error(`Lecture des formateurs impossible : ${error.message}`);
-      return (data as Formateur[]).map(enrichir);
+      return (data || []).map(enrichir);
     }
     return stockageLocal.formateurs().map(enrichir);
   },
@@ -76,25 +85,149 @@ export const formateurService = {
     if (!verdict.ok) throw new Error(verdict.motif);
 
     if (supabaseConfigure && supabase) {
-      const { data, error } = await supabase.from('formateurs').insert(saisie).select().single();
-      if (error) throw new Error(`Enregistrement refusé : ${error.message}`);
-      return enrichir(data as Formateur);
+      // 1. Récupérer l'id_paroisse numérique à partir du code de rattachement
+      const { data: paroisseData, error: paroisseError } = await supabase
+        .from('paroisses')
+        .select('id_paroisse')
+        .eq('code_paroisse', saisie.paroisse_code)
+        .single();
+
+      if (paroisseError || !paroisseData) {
+        throw new Error("Paroisse de rattachement introuvable pour ce code.");
+      }
+
+      // 2. Extraire les champs non présents dans la table 'formateurs'
+      const { paroisse_code, groupes, paroisse_affectation_code, ...donneesFormateur } = saisie as any;
+
+      // 3. Insérer dans la table formateurs
+      const { data: formateurData, error: formateurError } = await supabase
+        .from('formateurs')
+        .insert({
+          ...donneesFormateur,
+          paroisse_id: paroisseData.id_paroisse,
+        })
+        .select()
+        .single();
+
+      if (formateurError) throw new Error(`Enregistrement refusé : ${formateurError.message}`);
+
+      // 4. Insérer dans 'affectations' si des groupes ont été cochés
+      if (groupes && groupes.length > 0) {
+        let paroisseAffectationId = paroisseData.id_paroisse;
+        
+        if (paroisse_affectation_code && paroisse_affectation_code !== paroisse_code) {
+          const { data: affData } = await supabase
+            .from('paroisses')
+            .select('id_paroisse')
+            .eq('code_paroisse', paroisse_affectation_code)
+            .single();
+          if (affData) paroisseAffectationId = affData.id_paroisse;
+        }
+
+        const affectationsRows = groupes.map((groupeNum: number) => ({
+          formateur_id: formateurData.id_formateur,
+          paroisse_id: paroisseAffectationId,
+          groupe: groupeNum,
+        }));
+
+        const { error: affectError } = await supabase
+          .from('affectations')
+          .insert(affectationsRows);
+
+        if (affectError) throw new Error(`Erreur lors de l'affectation des groupes : ${affectError.message}`);
+      }
+
+      // 5. Récupérer le formateur complet ré-enrichi
+      const { data: finalData, error: finalError } = await supabase
+        .from('formateurs')
+        .select('*, affectations(*), paroisses(code_paroisse)')
+        .eq('id_formateur', formateurData.id_formateur)
+        .single();
+
+      if (finalError) throw new Error(`Erreur de lecture : ${finalError.message}`);
+      return enrichir(finalData);
     }
+
     return enrichir(stockageLocal.ajouterFormateur(saisie));
   },
 
-  async modifier(id: number, modifs: Partial<Formateur>): Promise<FormateurEnrichi> {
+  async modifier(id: number, modifs: Partial<FormateurSaisie>): Promise<FormateurEnrichi> {
     if (supabaseConfigure && supabase) {
-      const { data, error } = await supabase
+      const { paroisse_code, groupes, paroisse_affectation_code, ...donneesAMettreAJour } = modifs as any;
+      
+      const payloadFormateur: any = { ...donneesAMettreAJour };
+
+      if (paroisse_code) {
+        const { data: paroisseData } = await supabase
+          .from('paroisses')
+          .select('id_paroisse')
+          .eq('code_paroisse', paroisse_code)
+          .single();
+
+        if (paroisseData) {
+          payloadFormateur.paroisse_id = paroisseData.id_paroisse;
+        }
+      }
+
+      // 1. Mise à jour de la table 'formateurs'
+      const { error: updateErr } = await supabase
         .from('formateurs')
-        .update(modifs)
+        .update(payloadFormateur)
+        .eq('id_formateur', id);
+
+      if (updateErr) throw new Error(`Mise à jour refusée : ${updateErr.message}`);
+
+      // 2. Mise à jour des affectations si la propriété 'groupes' est fournie
+      if (Array.isArray(groupes)) {
+        await supabase.from('affectations').delete().eq('formateur_id', id);
+
+        if (groupes.length > 0) {
+          let paroisseAffectationId = payloadFormateur.paroisse_id;
+          
+          if (!paroisseAffectationId) {
+            const { data: currentFormateur } = await supabase
+              .from('formateurs')
+              .select('paroisse_id')
+              .eq('id_formateur', id)
+              .single();
+            paroisseAffectationId = currentFormateur?.paroisse_id;
+          }
+
+          if (paroisse_affectation_code && paroisse_affectation_code !== paroisse_code) {
+            const { data: affData } = await supabase
+              .from('paroisses')
+              .select('id_paroisse')
+              .eq('code_paroisse', paroisse_affectation_code)
+              .single();
+            if (affData) paroisseAffectationId = affData.id_paroisse;
+          }
+
+          const nouvellesAffectations = groupes.map((groupeNum: number) => ({
+            formateur_id: id,
+            paroisse_id: paroisseAffectationId,
+            groupe: groupeNum,
+          }));
+
+          const { error: affectError } = await supabase
+            .from('affectations')
+            .insert(nouvellesAffectations);
+
+          if (affectError) throw new Error(`Erreur affectations : ${affectError.message}`);
+        }
+      }
+
+      // 3. Récupérer l'enregistrement mis à jour ré-enrichi
+      const { data: finalData, error: finalError } = await supabase
+        .from('formateurs')
+        .select('*, affectations(*), paroisses(code_paroisse)')
         .eq('id_formateur', id)
-        .select()
         .single();
-      if (error) throw new Error(`Mise à jour refusée : ${error.message}`);
-      return enrichir(data as Formateur);
+
+      if (finalError) throw new Error(`Erreur de lecture : ${finalError.message}`);
+      return enrichir(finalData);
     }
-    const maj = stockageLocal.modifierFormateur(id, modifs);
+
+    const maj = stockageLocal.modifierFormateur(id, modifs as any);
     if (!maj) throw new Error('Formateur introuvable.');
     return enrichir(maj);
   },

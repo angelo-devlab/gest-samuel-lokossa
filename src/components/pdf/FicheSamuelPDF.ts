@@ -25,11 +25,6 @@ import {
  * sacrements reçus, progression liturgique et QR Code du Pass.
  */
 
-/**
- * Abréviations de l'échelle des grades. Couper les noms au caractère près
- * produisait des libellés illisibles (« Porte-béniti. ») ; ces formes courtes
- * sont choisies une à une.
- */
 const ABREGE: Record<string, string> = {
   'Porte-bénitier': 'Porte-bén.',
   'Céroféraire': 'Cérofér.',
@@ -37,6 +32,22 @@ const ABREGE: Record<string, string> = {
   'Thuriféraire': 'Thurifér.',
   'Cérémoniaire': 'Cérémon.',
 };
+
+/** Fonction utilitaire pour charger une image en base64 (pour jsPDF) depuis une URL distante */
+async function chargerImageEnBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
 
 function titreSection(doc: ReturnType<typeof nouveauDocument>, texte: string, y: number): number {
   doc.setFont('helvetica', 'bold');
@@ -76,16 +87,31 @@ export async function construireFicheSamuel(membre: SamuelEnrichi): Promise<jsPD
     sousTitre: paroisseService.libelleComplet(membre.paroisse_code),
   });
 
-  // Bandeau d'identité : nom en belle taille, matricule et QR à droite.
+  // Si une photo existe, on la télécharge et on l'insère à gauche
+  if (membre.photo_url) {
+    const base64Img = await chargerImageEnBase64(membre.photo_url);
+    if (base64Img) {
+      // Cadre photo de 22x22 mm
+      doc.addImage(base64Img, 'JPEG', 14, y + 1, 22, 22, undefined, 'FAST');
+      doc.setDrawColor(...BORDURE);
+      doc.setLineWidth(0.3);
+      doc.rect(14, y + 1, 22, 22);
+    }
+  }
+
+  // Décalage du texte si la photo est présente
+  const textX = membre.photo_url ? 40 : 14;
+
+  // Bandeau d'identité : nom, matricule et QR code à droite.
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(19);
   doc.setTextColor(...TEXTE);
-  doc.text(`${membre.prenom} ${membre.nom}`, 14, y + 6);
+  doc.text(`${membre.prenom} ${membre.nom}`, textX, y + 6);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(11);
   doc.setTextColor(...BLEU);
-  doc.text(membre.id_nid, 14, y + 13);
+  doc.text(membre.id_nid, textX, y + 13);
 
   const qr = await qrDataURL(membre.id_nid, membre.qr_code_hash, 360);
   doc.addImage(qr, 'PNG', 166, y - 2, 30, 30, undefined, 'SLOW');
@@ -99,11 +125,11 @@ export async function construireFicheSamuel(membre: SamuelEnrichi): Promise<jsPD
   const valide = membre.statut_validation;
   doc.setDrawColor(...(valide ? VERT_ACTION : ORANGE));
   doc.setLineWidth(0.5);
-  doc.roundedRect(14, y + 17, 46, 8, 1, 1, 'S');
+  doc.roundedRect(textX, y + 17, 46, 8, 1, 1, 'S');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...(valide ? VERT_ACTION : TEXTE));
-  doc.text(valide ? 'VALIDÉ PAR L’AUMÔNERIE' : 'EN ATTENTE DE VALIDATION', 17, y + 22.3);
+  doc.text(valide ? 'VALIDÉ PAR L’AUMÔNERIE' : 'EN ATTENTE DE VALIDATION', textX + 3, y + 22.3);
 
   y += 36;
 
@@ -185,8 +211,7 @@ export async function construireFicheSamuel(membre: SamuelEnrichi): Promise<jsPD
     doc.setTextColor(...(atteint ? TEXTE : GRIS));
     doc.text(`${g.rang}. ${ABREGE[g.nom] ?? g.nom}`, x, y + 8);
   });
-  // Bande de signature, ancrée en bas de page comme sur un acte : elle ne
-  // flotte pas au milieu de la feuille selon la longueur du dossier.
+
   const ySignature = doc.internal.pageSize.getHeight() - 28;
   doc.setDrawColor(...BORDURE);
   doc.setLineWidth(0.2);

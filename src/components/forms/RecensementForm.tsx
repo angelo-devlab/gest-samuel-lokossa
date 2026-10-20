@@ -12,7 +12,7 @@ import { calculerGroupe } from '../../lib/calculGroupe';
 import { calculerAge, aujourdhuiISO } from '../../lib/utils';
 import { NID_FORMAT_LISIBLE } from '../../config/constants';
 import { critereGroupe } from '../../config/libelles';
-
+import { uploaderEtObtenirUrlPhoto } from '../../services/samuelService';
 /**
  * Saisie et mise à jour d'une fiche du Registre Matrice Diocésain
  * (CDCF Module 2).
@@ -140,7 +140,7 @@ export function RecensementForm({
 
   return (
     <form onSubmit={soumettre} noValidate className="flex flex-col gap-4">
-      <Panneau titre="Identité">
+    <Panneau titre="Identité">
         <div className="grid gap-4 sm:grid-cols-2">
           <Input
             label="Nom"
@@ -189,15 +189,43 @@ export function RecensementForm({
             placeholder="+229 01 97 00 00 00"
             aide="Joignable en cas d'urgence pendant un camp"
           />
-         <input 
-          type="file" 
-          accept="image/*" 
-          capture="environment" 
-          id="photoInput"
-        />
+
+          {/* Champ d'importation de la photo */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-petit font-medium text-texte">Photo du Samuel</label>
+            <div className="flex items-center gap-3">
+              {v.photo_url && (
+                <img 
+                  src={v.photo_url} 
+                  alt="Aperçu" 
+                  className="h-12 w-12 rounded-full object-cover border border-bordure" 
+                />
+              )}
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment" 
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    setEnCours(true);
+                    const url = await uploaderEtObtenirUrlPhoto(file);
+                    if (url) {
+                      maj('photo_url', url);
+                    }
+                  } catch (err) {
+                    setErreurGenerale("Impossible d'importer la photo.");
+                  } finally {
+                    setEnCours(false);
+                  }
+                }}
+                className="text-petit text-texte-doux file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-petit file:font-semibold file:bg-bleu-clair file:text-bleu hover:file:bg-bleu-clair/80"
+              />
+            </div>
+          </div>
         </div>
       </Panneau>
-
       <Panneau
         titre="Rattachement"
         description="Le doyenné filtre les paroisses proposées."

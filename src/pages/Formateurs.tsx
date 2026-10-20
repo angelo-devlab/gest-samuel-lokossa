@@ -63,7 +63,9 @@ export function Formateurs() {
     for (const f of formateurs) {
       const cible = f.paroisse_affectation_code ?? f.paroisse_code;
       const s = couverture.get(cible) ?? new Set<number>();
-      f.groupes.forEach((g) => s.add(g));
+      // Sécurisation : on s'assure que f.groupes existe avant d'itérer
+      const listeGroupes = Array.isArray(f.groupes) ? f.groupes : (f.affectations?.map(a => a.groupe) || []);
+      listeGroupes.forEach((g) => s.add(g));
       couverture.set(cible, s);
     }
 
@@ -137,20 +139,23 @@ export function Formateurs() {
     {
       cle: 'groupes',
       entete: 'Groupes',
-      valeurTri: (f) => f.groupes.join(','),
-      rendu: (f) => (
-        <span className="flex flex-wrap gap-1">
-          {f.groupes.length === 0 ? (
-            <span className="text-petit text-texte-faible">—</span>
-          ) : (
-            f.groupes.map((g) => (
-              <Badge key={g} ton="bleu">
-                G{g}
-              </Badge>
-            ))
-          )}
-        </span>
-      ),
+      valeurTri: (f) => (f.groupes || []).join(','),
+      rendu: (f) => {
+        const groupesAffiches = Array.isArray(f.groupes) ? f.groupes : (f.affectations?.map(a => a.groupe) || []);
+        return (
+          <span className="flex flex-wrap gap-1">
+            {groupesAffiches.length === 0 ? (
+              <span className="text-petit text-texte-faible">—</span>
+            ) : (
+              groupesAffiches.map((g) => (
+                <Badge key={g} ton="bleu">
+                  G{g}
+                </Badge>
+              ))
+            )}
+          </span>
+        );
+      },
     },
     {
       cle: 'contact',
@@ -245,7 +250,7 @@ export function Formateurs() {
         />
       </Modal>
 
-      <Modal
+     <Modal
         ouvert={enEdition !== null}
         onFermer={() => setEnEdition(null)}
         titre={enEdition ? `${enEdition.prenom} ${enEdition.nom}` : ''}
@@ -270,7 +275,10 @@ export function Formateurs() {
               contact: enEdition.contact,
               paroisse_code: enEdition.paroisse_code,
               est_decanal_secteur: enEdition.est_decanal_secteur,
-              groupes: enEdition.groupes,
+              // On extrait proprement les numéros de groupes depuis affectations ou f.groupes
+              groupes: Array.isArray(enEdition.groupes) && enEdition.groupes.length > 0 
+                ? enEdition.groupes 
+                : (enEdition.affectations?.map((a: any) => a.groupe) || []),
               paroisse_affectation_code: enEdition.paroisse_affectation_code,
             }}
             paroissesAutorisees={autorisees}
